@@ -39,7 +39,7 @@ LaunchServices/CoreAnimation, not in the kernel and not in jetsam. See
 
 | Path | What |
 |---|---|
-| `kernel/files/` | the XNU source files we modified or added, at their original paths |
+| `kernel/README.md` | what the A03s port changes in XNU (description only, no Apple source) |
 | `loader/` | `xnuloader`, the EFI loader that starts XNU |
 | `userland/src/` | our init, injected libraries, drivers and test programs |
 | `userland/etc/` | `inject.conf`, `rc`, `rc.jobs`, the data-volume skeleton |
@@ -60,8 +60,8 @@ restore image). No Apple file is in this repository.
 
 1. Fetch and extract the iOS 16.5 IPSW (Apple's CDN) and build the HakiOS
    system image / userland as described in `docs/building.md`.
-2. Build the XNU kernel with the files in `kernel/files/` applied over the
-   HakiOS XNU tree.
+2. Build the XNU kernel from Apple's `xnu-8796.121.2`, with the HakiOS patch and
+   the A03s changes described in `kernel/README.md` applied.
 3. Build `xnuloader` (`loader/build.sh`) and the UEFI image
    (`uefi/MT6765Pkg` + `uefi/BootShim`).
 4. Pack a 32 MiB `boot.img` with `uefi/pack_boot_v2.py`.
@@ -81,10 +81,12 @@ with `scripts/pull_log.sh` while in TWRP.
 ## Credits and licenses
 
 This port stands on the **HakiOS** project by OOSEX GANG and contributors
-(`hackios-xnu-kernel`, `hackios-xnu-userland`). The XNU modifications are a
-derivative work of Apple's XNU and are under the **Apple Public Source License
-2.0**; everything else that is ours is under the **MIT License**. Third-party
-components and their terms are listed in [`NOTICE`](NOTICE).
+(`hackios-xnu-kernel`, `hackios-xnu-userland`). The A03s changes to Apple's XNU
+are described in [`kernel/README.md`](kernel/README.md) but are **not**
+redistributed here; if you reproduce them, they are a derivative work of XNU
+under the **Apple Public Source License 2.0**. Everything else that is ours is
+under the **MIT License**. Third-party components and their terms are listed in
+[`NOTICE`](NOTICE).
 
 iOS, iPhone and Apple are trademarks of Apple Inc. This project is not
 affiliated with, authorised or endorsed by Apple. No iOS binary, image, cache,

@@ -41,12 +41,9 @@ The loader packs `flashboot.apfs` + `root.apfs` as the two ramdisks (`rd=md0`,
    ```
 2. Prepare the HakiOS XNU tree (apply HakiOS `xnu/hakios.patch` and copy
    `xnu/files/`), as described by the HakiOS kernel repository.
-3. Overlay the files from this repository:
-   ```sh
-   cp -a kernel/files/. /path/to/xnu/
-   ```
-   They are at their original paths under `bsd/`, `osfmk/`, `iokit/` and
-   `pexpert/`.
+3. Reproduce the A03s changes described in `kernel/README.md` on that tree.
+   The modified Apple source is **not** redistributed in this repository; the
+   description lists every file and the intent of its change.
 4. Build with the HakiOS `xnu-build.sh` / `xnu-deps/setup.sh` flow. The result
    used here is
    `BUILD/obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837`.

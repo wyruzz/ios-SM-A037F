@@ -8,10 +8,14 @@ shared cache, font, image, app or vendor firmware.
 
 | Component | Path | Origin | License |
 |---|---|---|---|
-| XNU modifications | `kernel/files/` | derivative of Apple XNU `8796.121.2` | Apple Public Source License 2.0 (`LICENSE.APSL`) |
 | EDK2 / Project Mu port | `uefi/MT6765Pkg/`, `uefi/BootShim/` | EDK2, edk2-platforms, Project Mu | BSD-2-Clause-Patent where marked; see the headers |
 | HakiOS base code | `userland/src/`, `loader/`, scripts | OOSEX GANG / HakiOS contributors | MIT |
 | A03s port changes | everything else | the A03s port contributors | MIT |
+
+The A03s changes to Apple's XNU are **not** redistributed in this repository;
+`kernel/README.md` describes them. If you reproduce them, they are a derivative
+work of XNU and are under the Apple Public Source License 2.0 (`LICENSE.APSL`);
+keep Apple's notices.
 
 ## Fetched at build time, never committed
 
