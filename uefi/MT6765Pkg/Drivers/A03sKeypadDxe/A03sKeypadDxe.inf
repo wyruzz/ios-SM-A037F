@@ -1,0 +1,38 @@
+# A03sKeypadDxe.inf: volume/power keys for the Samsung Galaxy A03s.
+#
+# Publishes EFI_SIMPLE_TEXT_INPUT_PROTOCOL over the MT6765 keypad matrix and
+# the gEFIDroidKeypadDeviceProtocolGuid marker used by PlatformBootManagerLib.
+
+[Defines]
+  INF_VERSION                    = 0x0001001a
+  BASE_NAME                      = A03sKeypadDxe
+  FILE_GUID                      = 6f3a1c2e-8b4d-4e7a-9c1f-2a3b4c5d6e7f
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = A03sKeypadInitialize
+
+[Sources]
+  A03sKeypadDxe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  MT6765Pkg/MT6765Pkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  IoLib
+  MemoryAllocationLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+  UefiLib
+
+[Protocols]
+  gEfiDevicePathProtocolGuid
+  gEfiSimpleTextInProtocolGuid
+  gEFIDroidKeypadDeviceProtocolGuid
+
+[Depex]
+  TRUE

@@ -1,0 +1,21 @@
+## @file
+#  XNU payload embedded in the firmware.
+#
+#  xnu_payload.c is generated from the payload binary produced by the
+#  HackiOS build; do not edit it by hand.
+#
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = XnuPayloadLib
+  FILE_GUID                      = 7c1d9e64-2a58-4b0f-8d37-6e4a1c9f2b83
+  MODULE_TYPE                    = BASE
+  VERSION_STRING                 = 1.0
+  LIBRARY_CLASS                  = XnuPayloadLib
+
+[Sources]
+  xnu_payload.c
+
+[Packages]
+  MdePkg/MdePkg.dec

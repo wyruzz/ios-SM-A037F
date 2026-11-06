@@ -1,0 +1,21 @@
+## @file
+#  Embedded HackiOS XNU loader image.
+#
+#  loader_efi.c is generated from xnuloader/loader.efi by build_xnuloader.sh;
+#  do not edit it by hand.
+#
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = XnuLoaderImageLib
+  FILE_GUID                      = 1b8f3a52-7c4d-4e11-b6a9-3d2f5c8e9a71
+  MODULE_TYPE                    = BASE
+  VERSION_STRING                 = 1.0
+  LIBRARY_CLASS                  = XnuLoaderImageLib
+
+[Sources]
+  loader_efi.c
+
+[Packages]
+  MdePkg/MdePkg.dec

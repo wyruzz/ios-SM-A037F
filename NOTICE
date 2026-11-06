@@ -1,0 +1,32 @@
+# Third-party components and licenses
+
+This repository contains only the A03s port's own code and the files derived
+from open-source projects. It does **not** contain any iOS binary, IPSW, dyld
+shared cache, font, image, app or vendor firmware.
+
+## In this repository
+
+| Component | Path | Origin | License |
+|---|---|---|---|
+| XNU modifications | `kernel/files/` | derivative of Apple XNU `8796.121.2` | Apple Public Source License 2.0 (`LICENSE.APSL`) |
+| EDK2 / Project Mu port | `uefi/MT6765Pkg/`, `uefi/BootShim/` | EDK2, edk2-platforms, Project Mu | BSD-2-Clause-Patent where marked; see the headers |
+| HakiOS base code | `userland/src/`, `loader/`, scripts | OOSEX GANG / HakiOS contributors | MIT |
+| A03s port changes | everything else | the A03s port contributors | MIT |
+
+## Fetched at build time, never committed
+
+| Component | Fetched by | Origin | License |
+|---|---|---|---|
+| iOS 16.5 IPSW (iPhone10,3) | the user, from Apple's CDN | Apple | Apple's; your own copy |
+| HakiOS XNU tree / `xnu/hakios.patch` | `git clone` of the HakiOS repository | OOSEX GANG / contributors | MIT / APSL for the XNU part |
+| HakiOS userland / system image tools | `git clone` of the HakiOS repository | OOSEX GANG / contributors | MIT |
+| EDK2, edk2-platforms | `git clone` | TianoCore / contributors | BSD-2-Clause-Patent |
+| iPhoneOS 16.5 SDK, cctools | the HakiOS `xnu-deps/setup.sh` | Apple / theos | Apple's / their own |
+| A03s stock `boot.img` | the user, from the phone | Samsung / MediaTek | vendor's; your own device |
+| Phone firmware (modem, TEE, etc.) | the user, from the phone | MediaTek / Samsung | vendor's; your own device |
+
+## Trademarks
+
+iOS, iPhone, Apple, SpringBoard and related names are trademarks of Apple Inc.
+This is an independent research project and is not affiliated with, authorised
+or endorsed by Apple Inc., Samsung Electronics or MediaTek.
