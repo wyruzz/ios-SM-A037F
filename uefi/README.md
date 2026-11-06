@@ -40,6 +40,10 @@ mirrors the sources to a path without spaces (EDK2 rejects spaces in
 `WORKSPACE`), builds `MT6765Pkg/Devices/a03s.dsc`, and concatenates
 `BootShim.bin` + `MT6765PKG_UEFI.fd`.
 
+`MT6765Pkg/Library/XnuLoaderImageLib/loader_efi.c` is **generated** from the
+built `loader.efi` by `scripts/build_xnuloader.sh`; it is not committed here.
+Build the loader first, then the UEFI.
+
 ## Boot image
 
 The boot partition is 32 MiB. `BootShim` + the UEFI FD live at offset `0xE0` /
