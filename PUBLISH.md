@@ -54,5 +54,6 @@ git push -u origin main
 - Keep `STATUS.md` current: it is the honest "what works / what does not" page.
 - Never add `identity.h`, the IPSW, the dyld cache, `system.apfs`,
   `flashboot.apfs`, boot backups or logs containing a serial/ECID.
-- The `kernel/files/` tree is APSL; keep `LICENSE.APSL` and the Apple notices in
-  the files.
+- The A03s kernel changes are described in `kernel/README.md`, not shipped. If
+  you add them to a public tree, keep `LICENSE.APSL` and Apple's notices; better
+  still, keep them in a private tree.
