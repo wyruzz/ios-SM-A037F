@@ -72,7 +72,7 @@ with `scripts/pull_log.sh` while in TWRP.
 
 ## Hardware
 
-- Samsung Galaxy A03s `SM-A037F`, MediaTek **MT6765** (Helio G37), 4 GB RAM,
+- Samsung Galaxy A03s `SM-A037F`, MediaTek **MT6765** (Helio P35), 4 GB RAM,
   64 GB eMMC.
 - Panel 720x1600; no GPU driver, so CoreAnimation runs in software.
 - The boot partition is 32 MiB; the loader puts its live log at 24 MiB and the
