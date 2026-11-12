@@ -425,6 +425,13 @@ if [ -f ../fw-wifi/wpss.mdt ]; then
 	# SHARE=1: leave it out, for an image that is going to somebody else -- it is a passphrase
 	if [ -z "$SHARE" ] && [ -f ../fw-wifi/network ]; then install -m 0600 ../fw-wifi/network root/fw/network; fi
 fi
+# ... and the touch controller's firmware, the phone's /vendor/firmware/xl_truly_firmware_nl9911c.bin, from ../fw-touch
+# (the Chipone ICNL9911C has no flash: bsd/dev/mediatek_input.c writes this into its SRAM at boot)
+if [ -f ../fw-touch/xl_truly_firmware_nl9911c.bin ]; then
+	mkdir -p root/fw
+	install -m 0644 ../fw-touch/xl_truly_firmware_nl9911c.bin root/fw/
+fi
+
 # ... and the vibration motor's waveforms, the phone's /vendor/firmware/aw8697_haptic.bin, from ../fw-haptic
 # (bsd/dev/hakios.haptic.c, haptic=3; 3.6 KB, the vendor's and not in the repository either)
 if [ -f ../fw-haptic/aw8697_haptic.bin ]; then

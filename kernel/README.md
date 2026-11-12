@@ -53,8 +53,22 @@ Apply the changes below to the corresponding files in your XNU tree.
   flush and the alpha fix (all colors must be `0xFF…` on this panel).
 - `bsd/dev/mediatek_display.c`, `bsd/dev/mediatek_display.h` — MT6765
   display/DSI setup.
+- `bsd/dev/mediatek_input.c` — the Chipone ICNL9911C touchscreen: bit-banged
+  SPI on GPIO25-28, the vendor firmware into the controller's SRAM, and the
+  HID events (touch, on-screen Power / Volume Up / Volume Down).
 - `iokit/Kernel/IOService.cpp`, `iokit/bsddev/IOKitBSDInit.cpp` — IOKit
   bootstrap for the port.
+
+### CPU / SMP / clocks
+
+- `bsd/dev/redwood_cpufreq.c` — a read-only MT6765 clock probe (APMIXED
+  `0x1000c000`, the `ARMPLL_*` and `MP*_PLL_DIV_CFG` registers, DVFSP
+  `0x00110800`) and a real clock measurement: the core's `PMCCNTR_EL0` cycles
+  against the 13 MHz `CNTVCT_EL0` generic timer. It replaces the earlier
+  Qualcomm EPSS driver, whose registers do not exist on an MT6765.
+- `osfmk/arm64/psci_smp.c`, `iokit/Kernel/GenericARMPE.cpp` — the PSCI
+  `CPU_ON` path and the secondary-processor start-up; the A03s loader can list
+  the second (little) cluster in the device tree.
 
 ### Log
 
@@ -62,6 +76,9 @@ Apply the changes below to the corresponding files in your XNU tree.
   `bsd/conf/files` — the kernel console and the shared log window.
 - `osfmk/arm64/loader_return.c` — `loader_return_after=...` keeps the kernel
   (and its log) alive instead of returning to the loader.
+- The per-page-in `EXECDBG` prints were removed from `bsd/vm/vnode_pager.c`,
+  `osfmk/vm/bsd_vm.c` and `bsd/miscfs/apfs/apfs_vnops.c`; the remaining
+  bring-up dumps are behind `sbprobe=1` (userland) or `fbtrace=1`.
 
 ### Other
 

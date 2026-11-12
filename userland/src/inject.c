@@ -163,6 +163,26 @@ probe_threads(int fd)
 static int probe_fd = 2;
 static int probe_fix_um;
 
+/* Boot-arg sbprobe=1: the debugging dumps of this library (RBS methods, every thread's stack,
+   UserManagement's methods). Off by default: each walks every thread and writes it to the
+   console, and on one processor that is not free. */
+static int
+probe_verbose(void)
+{
+	static int on = -1;
+
+	if (on < 0) {
+		char args[512];
+		size_t size = sizeof(args) - 1;
+
+		on = 0;
+		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "sbprobe=1") != NULL) {
+			on = 1;
+		}
+	}
+	return on;
+}
+
 /* BOOL return for the UserManagement questions that make lsd ask usermanagerd for personas. */
 static BOOL
 probe_return_no(id self __unused, SEL cmd __unused)
@@ -644,11 +664,13 @@ probe_start(const char *name)
 	}
 	probe_fd = fd;
 	probe_who = name;
-	for (int n = 1; n <= 3; n++) {
-		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)n * 3000 * NSEC_PER_MSEC),
-		    dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-			dump_rbs_methods();
-		});
+	if (probe_verbose()) {
+		for (int n = 1; n <= 3; n++) {
+			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)n * 3000 * NSEC_PER_MSEC),
+			    dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+				dump_rbs_methods();
+			});
+		}
 	}
 	if (strcmp(name, "backboardd") == 0) {
 		patch_backboard_shell_watchdog();
@@ -675,7 +697,7 @@ probe_start(const char *name)
 		sigaction(SIGBUS, &sa, NULL);
 		probe_say(fd, "hakios probe: signal handlers in\n");
 	}
-	if (probe_fix_um) {
+	if (probe_fix_um && probe_verbose()) {
 		for (int n = 1; n <= 4; n++) {
 			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)n * 3000 * NSEC_PER_MSEC),
 			    dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -683,7 +705,7 @@ probe_start(const char *name)
 			});
 		}
 	}
-	if (strcmp(name, "usermanagerd") == 0) {
+	if (strcmp(name, "usermanagerd") == 0 && probe_verbose()) {
 		for (int n = 1; n <= 8; n++) {
 			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)n * 200 * NSEC_PER_MSEC),
 			    dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -695,6 +717,9 @@ probe_start(const char *name)
 	{
 		int samples = strcmp(name, "lsd") == 0 ? 60 : 12;
 
+		if (!probe_verbose()) {
+			samples = 0;
+		}
 		for (int n = 1; n <= samples; n++) {
 			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)n * 10 * NSEC_PER_SEC),
 		    dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{

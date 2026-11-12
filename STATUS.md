@@ -13,6 +13,11 @@
   `cfprefsd`, `runningboardd`, `backboardd`, `lsd`, `SpringBoard`, and the
   rest of the ~400 launchd jobs. `securityd`, `usermanagerd`, `installd`,
   `iconservicesagent` and friends come up too.
+- **Touchscreen**: the Chipone ICNL9911C on the A03s, driven by bit-banged SPI
+  on GPIO25-28 (`bsd/dev/mediatek_input.c`); its firmware
+  (`xl_truly_firmware_nl9911c.bin`, taken from the phone's own vendor
+  partition) is written into the controller's SRAM at boot. Touch and the
+  on-screen Power / Volume Up / Volume Down buttons reach iOS as HID events.
 - **Memory**: `phys window d0000000 size 6fffc000 (forced)` →
   `memory 1791 MB, page size 16384, 1 cpu`. No `pmap_assert_free`, no
   `compressed PTE ... corrupted`, no jetsam kills.
@@ -68,30 +73,38 @@ win_base=0xd0000000 win_size=0x6fffc000
 The kernel then sees `physBase=0xD0000000`, `memSize=0x6FFFC000`, and
 `topOfKernelData` just above the loaded payload.
 
-## The remaining SpringBoard respawn
+## The remaining respring (Settings / Siri)
 
-SpringBoard starts and runs, but exits with `exit(0)` and launchd starts it
-again. The cycle is `sb_delay=8` (the injected library sleeps 8 s in its
-constructor) plus ~3.5 s of work, so ~11.5 s per cycle. Things already ruled out:
+The lock screen, SpringBoard and touch work. Opening Settings or Siri still
+brings the shell down: the APFS page-in path returns `EIO` for a handful of
+files (`powerd`, `dyld_shared_cache_arm64.1`, `langid.inv`, `mediaremoted`,
+`useractivityd`, `healthd`, `remindd`, `searchd`, `MobileSlideShow`,
+`contextstored`), so the daemon cannot start and the shell is torn down.
 
-- **Jetsam**: with 1.75 GB there are no jetsam kills; `memory: free` stays
-  around 20-30 MB free but `available` is ~1.2 GB, and the kill thresholds are
-  170/85 MB.
-- **Backboardd shell watchdog**: the setter function at `backboardd+0x1fb68`
-  is patched to `ret`, and `[SystemShell] START WATCHDOG` no longer appears.
-- **LaunchServices seeding wait**: the branch at `CoreServices+0x257fc` is
-  patched to skip the wait, and both synchronous server-store wrappers
-  (`CoreServices+0xdcf24` and `+0xdcf3c`) return `nil`.
+Things already ruled out:
 
-The last stack samples show the main thread in `QuartzCore`/`mach_msg` and then
-a clean `exit(0)`. The next step is to capture a sample at ~9-10 s (just before
-the exit) and to enable `os_log` for SpringBoard, `backboardd` and `lsd` in the
-launchd jobs, to see the scene/`UIApplicationMain` path that decides to exit.
+- **Jetsam**: with 1.75 GB there are no jetsam kills; `available` stays around
+  1.2 GB and the kill thresholds are 170/85 MB.
+- **Fake entitlements**: the kernel now answers `CS_OPS_STATUS` and the
+  entitlement queries with real XML/DER blobs, so processes are no longer
+  marked `NOT_CODESIGNED` and SpringBoard no longer respawns for that reason.
+- **Backboardd shell watchdog** and the **LaunchServices seeding wait** are
+  patched out (`backboardd+0x1fb68` → `ret`, `CoreServices+0x257fc`).
+
+The next step is the APFS read path itself: find which node/extent returns
+`EIO` for those files and fix the reader (a `apfs_lenient=1` mode that skips a
+bad page is the fallback, not the fix).
 
 ## Not done
 
-- Touchscreen (the A03s controller has not been identified yet).
+- APFS page-in `EIO` for the daemons above (the cause of the Settings/Siri
+  respring).
 - GPU/Metal (CoreAnimation runs in software; `Simulating crash!` from QuartzCore
   is expected).
+- SMP: the loader can list the second (little) cluster, but XNU still reports
+  `hw.ncpu 1`; the secondary cores are not brought up yet.
+- CPU frequency scaling: the MT6765 top OPP is not enabled. The loader now
+  measures the real core clock with the PMU against the 13 MHz generic timer
+  (the earlier `300 MHz` line came from reading the wrong register block).
 - Cellular, Wi-Fi, audio, camera, sensors.
 - Multi-range DRAM.

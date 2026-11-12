@@ -8,15 +8,17 @@ project: a boot menu, a display driver, a persistent log on eMMC, a UEFI port fo
 the MT6765, and enough of a kernel to run `launchd`, `backboardd` and SpringBoard
 on the iPhone X (`iPhone10,3`, `d22ap`) system image.
 
-## Status (6 November 2026)
+## Status (12 November 2026)
 
 | Works | Does not work / open |
 |---|---|
-| Boot menu (Vol Up/Down + Power), UEFI on the A03s | SpringBoard still respawns every ~11.5 s |
-| Display (720x1600 panel, `IOMobileFramebuffer`) | Touchscreen: no real driver yet |
-| Apple logo, `launchd`, `backboardd`, SpringBoard | Metal/OpenGL ES: no GPU driver |
-| **1.75 GB of RAM** given to XNU (`0xD0000000`, 1.75 GB window) | Cellular, Wi-Fi, audio, camera, sensors |
-| Persistent live log on eMMC (pull with `./pull_log.sh`) | Multi-range DRAM (the rest of the 4 GB is fragmented) |
+| Boot menu (Vol Up/Down + Power), UEFI on the A03s | Settings/Siri still respawn (APFS page-in `EIO`) |
+| Display (720x1600 panel, `IOMobileFramebuffer`) | Metal/OpenGL ES: no GPU driver |
+| **Touchscreen**: Chipone ICNL9911C, bit-banged SPI (GPIO25-28) | SMP: the kernel still runs one processor |
+| On-screen Power / Volume Up / Volume Down buttons | Real CPU frequency scaling (measurement only so far) |
+| Apple logo, `launchd`, `backboardd`, SpringBoard | Cellular, Wi-Fi, audio, camera, sensors |
+| **1.75 GB of RAM** given to XNU (`0xD0000000`, 1.75 GB window) | Multi-range DRAM (the rest of the 4 GB is fragmented) |
+| Persistent live log on eMMC, written every 15 s (pull with `./pull_log.sh`) | |
 | iOS 16.5 root from APFS on `userdata` + RAM disks | |
 
 The main result of this stage is the memory window:
@@ -30,9 +32,10 @@ It is one contiguous `System RAM` range from the phone's own `/proc/iomem`
 (`0xD0000000..0x13FFFEFFF`), above the TEE/modem/SCP carve-outs. Earlier windows
 were 224 MB and 736 MB; 1.75 GB is the largest clean contiguous range available.
 
-SpringBoard currently starts, runs for a few seconds and exits cleanly
-(`exit(0)`), and launchd starts it again. The last stack shows it blocked in
-LaunchServices/CoreAnimation, not in the kernel and not in jetsam. See
+Touch, the on-screen buttons and the lock screen work; the earlier respring
+caused by fake entitlements is fixed (the kernel now answers `CS_OPS_STATUS`
+and entitlements with real XML/DER blobs). The remaining respring is in
+Settings/Siri, where APFS page-in returns `EIO` for a handful of daemons. See
 [`STATUS.md`](STATUS.md) for the details.
 
 ## Repository layout

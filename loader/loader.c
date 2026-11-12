@@ -499,6 +499,7 @@ static uint8_t block_buffer[BLOCK_BUFFER_SIZE] __attribute__((aligned(0x2000)));
 static const char *staged_data = out_buf;   /* what "upload" sends: normally the log in out_buf */
 static uint64_t staged_len;
 static int log_full_live;               /* out_buf already holds the whole kernel log */
+static int log_skip_readback;           /* a live flush: written, not read back (the card is the kernel's to use) */
 
 static void
 compose_logs(const char *klog, uint64_t klog_len)
@@ -562,7 +563,7 @@ write_logs(const char *klog, uint64_t klog_len)
 		err = emmc_write_blocks((uint32_t)log_lba, (uint32_t)(elen / 512),
 		    (const uint8_t *)out_buf);
 		int same = 0, rs = 0;
-		if (err == 0 && elen <= sizeof(block_buffer)) {
+		if (!log_skip_readback && err == 0 && elen <= sizeof(block_buffer)) {
 			/* the card may still be programming: give it time, then re-read */
 			for (int attempt = 0; attempt < 4; attempt++) {
 				rs = emmc_read_blocks((uint32_t)log_lba, (uint32_t)(elen / 512), block_buffer);
@@ -577,10 +578,13 @@ write_logs(const char *klog, uint64_t klog_len)
 		log_write_tried = 1;
 		log_len_written = elen;
 		log_ws = err ? 1 : 0;
-		log_same = same;
+		log_same = log_skip_readback ? 1 : same;
 		if (err != 0) {
 			print("log: %d bytes NOT written to %s at lba %x (%d)\n", elen, log_target,
 			    log_lba, (uint64_t)err);
+		} else if (log_skip_readback) {
+			print("log: %d bytes written to %s at lba %x (live, not read back)\n", elen,
+			    log_target, log_lba);
 		} else if (rs != 0) {
 			print("log: %d bytes written to %s at lba %x, read back FAILED (%d)\n", elen,
 			    log_target, log_lba, (uint64_t)rs);
@@ -998,6 +1002,8 @@ struct platform {
 	int log_other_cpu;               /* keep notes in the log partition while a kernel starts on another core */
 	int cores;                       /* at most this many processor cores, numbered from 0 ... */
 	int core_shift;                  /* ... in this bit of MPIDR: the phone numbers them in the second affinity field */
+	int cluster_cores;               /* 0: one cluster of .cores, numbered in .core_shift; otherwise this many per cluster */
+	int clusters;                    /* with .cluster_cores: this many clusters, the second at MPIDR bit 8 */
 	uint32_t timeout_scale;          /* a kernel on several cores gets this much longer to wait for a lock, 0: as it is */
 	uint32_t small_cores;            /* a bit for each of the slower cores, by number: "small-core" in the device tree */
 	uint64_t fb_base;                /* the framebuffer the firmware reports (GOP): it tells this device apart */
@@ -1044,8 +1050,8 @@ static const struct platform platform_redwood = {
 static const struct platform platform_a03s = {
 	.name = "a03s", .io_base = 0x00400000, .io_size = 0x3FC00000,
 	.gic_dist = 0x0C000000, .gic_redist = 0x0C100000, .uart = 0,
-	.cores = 4, .core_shift = 0,
-	.small_cores = 0x0f,
+	.cores = 4, .core_shift = 0, .cluster_cores = 4, .clusters = 2,
+	.small_cores = 0,
 	.fb_base = 0x7C250000,
 	/* keep the log partition current while the kernel runs (see flush_live_log) */
 	.log_other_cpu = 1,
@@ -1713,6 +1719,12 @@ static void fill_screen(uint32_t color);
 static void
 flush_live_log(void)
 {
+	/*
+	 * This is the kernel's log while it runs: written, not read back. The read-back doubles
+	 * the traffic through the same controller the kernel's own storage requests use, and a
+	 * log written every few seconds is not worth that.
+	 */
+	log_skip_readback = 1;
 	if (running_live != NULL) {
 		/*
 		 * Write the loader's own lines first: if composing the kernel's ring
@@ -1726,6 +1738,7 @@ flush_live_log(void)
 		print("live-log: composed %d bytes\n", (int)staged_len);
 	}
 	flush_log();
+	log_skip_readback = 0;
 }
 
 
@@ -3444,7 +3457,7 @@ run_on_other_cpu(uint64_t mpidr, uint64_t entry, uint64_t boot_args_pa, const st
 					}
 				}
 			}
-			if (PLAT->log_other_cpu && seconds_since(last_log_write) >= 4) {
+			if (PLAT->log_other_cpu && seconds_since(last_log_write) >= 15) {
 				flush_live_log();
 				last_log_write = READ_SYSREG(CNTVCT_EL0);
 			}
@@ -3469,7 +3482,7 @@ run_on_other_cpu(uint64_t mpidr, uint64_t entry, uint64_t boot_args_pa, const st
 				if (seconds_since(started) < SCREEN_QUIET_SECONDS) {
 					note_kernel_progress(live, slide, seconds_since(started));
 				}
-				if (PLAT->log_other_cpu && seconds_since(last_log_write) >= 4) {
+				if (PLAT->log_other_cpu && seconds_since(last_log_write) >= 15) {
 					flush_live_log();
 					last_log_write = READ_SYSREG(CNTVCT_EL0);
 				}
@@ -5235,6 +5248,8 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	uint64_t this_mpidr = READ_SYSREG(MPIDR_EL1) & 0xFFFFFF, kernel_mpidr = this_mpidr;
 	/* "cpus=N" or "cpumask=M" there too: the kernel may have more cores than the one it starts on */
 	int more_cores = 0, battery_requested = 0, ufs_requested = 0;
+	/* "clusters=N" there too: how many processor clusters the kernel may have (default 1) */
+	int clusters_asked = 0;
 	/* "torch=N" (not 0) there too: the phone's flashlight is the kernel's (bsd/dev/redwood_torch.c) */
 	int torch_requested = 0;
 	/* "cam=5" there too: the phone's wide camera is iOS's (bsd/dev/redwood_camera.c) */
@@ -5250,6 +5265,10 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 			kernel_mpidr = (uint64_t)(c[8] - '0') << PLAT->core_shift;
 		}
 		more_cores |= (starts_with(c, "cpus=") || starts_with(c, "cpumask=")) && (c == pi.cmdline || c[-1] == ' ');
+		if (starts_with(c, "clusters=") && (c == pi.cmdline || c[-1] == ' ') &&
+		    c[9] >= '1' && c[9] <= '9' && (c[10] == 0 || c[10] == ' ')) {
+			clusters_asked = c[9] - '0';
+		}
 		battery_requested |= starts_with(c, "battery=1") && (c == pi.cmdline || c[-1] == ' ') &&
 		    (c[9] == 0 || c[9] == ' ');
 		torch_requested |= starts_with(c, "torch=") && (c == pi.cmdline || c[-1] == ' ') && c[6] >= '1' && c[6] <= '9';
@@ -5628,13 +5647,32 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	int cpu_count = 1, boot_core = (int)(kernel_mpidr >> plat->core_shift);
 
 	if (more_cores) {
-		for (int distance = 1; distance < plat->cores; distance++) {
-			for (int side = 0; side < 2; side++) {
-				int core = side == 0 ? boot_core + distance : boot_core - distance;
-				uint64_t mpidr = (uint64_t)core << plat->core_shift;
+		int per = plat->cluster_cores != 0 ? plat->cluster_cores : plat->cores;
+		int max_clusters = plat->cluster_cores != 0 ? plat->clusters : 1;
+		int clusters = 1;
+		int boot_aff0 = boot_core & (per - 1);
+
+		/* "clusters=N": how many clusters to offer the kernel (default 1: the boot core's). */
+		if (clusters_asked >= 1) {
+			clusters = clusters_asked < max_clusters ? clusters_asked : max_clusters;
+		}
+		print("loader: processor list (core %x first, %d cluster(s), %d each)\n", (uint32_t)boot_core, clusters, per);
+		for (int cluster = 0; cluster < clusters; cluster++) {
+			for (int i = 0; i < per; i++) {
+				int core = (boot_aff0 - i + per) % per;
+				uint64_t mpidr = ((uint64_t)cluster << 8) | ((uint64_t)core << plat->core_shift);
 				int64_t state;
 
-				if (core < 0 || core >= plat->cores || mpidr == this_mpidr) {
+				if (cpu_count >= 8 || mpidr == kernel_mpidr || mpidr == this_mpidr) {
+					continue;
+				}
+				/*
+				 * Only cores of the boot cluster are asked about: a firmware that does not
+				 * know the second one may answer by hanging rather than with an error, and
+				 * the kernel starts those itself (PSCI CPU_ON) where a failure is reported.
+				 */
+				if (cluster != 0) {
+					cpu_mpidr[cpu_count++] = mpidr;
 					continue;
 				}
 				state = psci_call(PSCI_AFFINITY_INFO, mpidr, 0, 0);
@@ -5746,6 +5784,8 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 		uint64_t sp_now = (uint64_t)(uintptr_t)__builtin_frame_address(0);
 		clean_dcache(sp_now - 0x2000, sp_now + 0x2000);
 		flush_dcache(phys_base, top);
+		print("loader: starting the kernel on core %x (window %x size %x)\n", (uint32_t)kernel_mpidr,
+		    win_base, win_size);
 		if (checkpoint == CHECKPOINT_SELFTEST) {
 			/* Do not enter the kernel at all: exercise only the return path. */
 			jump_to_kernel((uint64_t)(uintptr_t)&loader_return_stub, 0);

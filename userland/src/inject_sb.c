@@ -50,6 +50,7 @@
 #include <objc/runtime.h>
 #include <stdarg.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,6 +60,24 @@
 
 /* where what is said goes: the standard error, which is the console's for SpringBoard (an application's is nowhere) */
 static int say_fd = 2;
+
+/* Boot-arg sbprobe=1: walk every thread's stack every few seconds. Off by default. */
+static int
+sb_probe_verbose(void)
+{
+	static int on = -1;
+
+	if (on < 0) {
+		char args[512];
+		size_t size = sizeof(args) - 1;
+
+		on = 0;
+		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "sbprobe=1") != NULL) {
+			on = 1;
+		}
+	}
+	return on;
+}
 
 static void
 say(const char *format, ...)
@@ -75,6 +94,145 @@ say(const char *format, ...)
 	}
 	write(say_fd, line, (size_t)n);
 }
+
+/* --- exit backtrace: who decides that SpringBoard should go? ------------------------------- */
+
+extern int backtrace(void **buffer, int size);
+extern void backtrace_symbols_fd(void *const *buffer, int size, int fd);
+
+static void
+sb_exit_common(const char *what, int code)
+{
+	void *frames[64];
+	int n;
+
+	n = backtrace(frames, 64);
+	say("hakios: SpringBoard %s(%d), %d frames\n", what, code, n);
+	backtrace_symbols_fd(frames, n, say_fd);
+	syscall(SYS_exit, code);
+}
+
+static void
+sb_exit_trampoline(int code)
+{
+	sb_exit_common("exit", code);
+}
+
+/*
+ * Calls made from inside the shared cache branch straight into libsystem_c's
+ * `exit`, so the dyld __interpose above never sees them.  Patch the entry of
+ * the functions themselves in this process (a private copy of the cache page).
+ */
+static void
+sb_patch_one_exit(const char *name)
+{
+	void *sym = dlsym(RTLD_NEXT, name);
+	uintptr_t entry, page;
+	kern_return_t kr;
+
+	if (sym == NULL) {
+		sym = dlsym(RTLD_DEFAULT, name);
+	}
+	if (sym == NULL) {
+		return;
+	}
+	entry = (uintptr_t)sym;
+	page = entry & ~0xfffUL;
+	kr = vm_protect(mach_task_self(), (vm_address_t)page, 0x2000, FALSE,
+	    VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+	if (kr != KERN_SUCCESS) {
+		say("hakios: %s trace: vm_protect kr %d\n", name, kr);
+		return;
+	}
+	((uint32_t *)entry)[0] = 0x58000050;    /* ldr x16, #8 */
+	((uint32_t *)entry)[1] = 0xd61f0200;    /* br x16 */
+	((uint64_t *)(entry + 8))[0] = (uint64_t)(uintptr_t)sb_exit_trampoline;
+	sys_icache_invalidate((void *)entry, 16);
+	vm_protect(mach_task_self(), (vm_address_t)page, 0x2000, FALSE,
+	    VM_PROT_READ | VM_PROT_EXECUTE);
+	say("hakios: %s at %p -> exit trace\n", name, sym);
+}
+
+static void
+sb_patch_exit_functions(void)
+{
+	sb_patch_one_exit("exit");
+	sb_patch_one_exit("_exit");
+	sb_patch_one_exit("_Exit");
+	sb_patch_one_exit("__exit");
+}
+
+/*
+ * The clean exit that starts the respring loop does not come from
+ * UIApplicationMain: the frame-pointer walk from the kernel's userexit trace
+ * goes
+ *
+ *   libsystem_c:exit -> BackBoardServices+0x3ccb4 -> BoardServices ...
+ *
+ * That block in BackBoardServices is the system shell connection's
+ * invalidation handler; when backboardd drops the shell it calls exit(0) and
+ * launchd starts SpringBoard again.  Let the block return instead: SpringBoard
+ * stays up and can be looked at.
+ */
+static void
+sb_patch_shell_exit_block(void)
+{
+	uintptr_t base = 0, entry, page;
+	kern_return_t kr;
+
+	for (uint32_t i = 0; i < _dyld_image_count(); i++) {
+		const char *name = _dyld_get_image_name(i);
+
+		if (name != NULL && strstr(name, "BackBoardServices.framework/BackBoardServices") != NULL) {
+			base = (uintptr_t)_dyld_get_image_header(i);
+			break;
+		}
+	}
+	if (base == 0) {
+		say("hakios: BackBoardServices not found for the shell exit block\n");
+		return;
+	}
+	entry = base + 0x3cc54;
+	page = entry & ~0xfffUL;
+	kr = vm_protect(mach_task_self(), (vm_address_t)page, 0x2000, FALSE,
+	    VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+	if (kr != KERN_SUCCESS) {
+		say("hakios: shell exit block: vm_protect kr %d\n", kr);
+		return;
+	}
+	*(uint32_t *)entry = 0xd65f03c0;        /* ret */
+	sys_icache_invalidate((void *)entry, 4);
+	vm_protect(mach_task_self(), (vm_address_t)page, 0x2000, FALSE,
+	    VM_PROT_READ | VM_PROT_EXECUTE);
+	say("hakios: BackBoardServices shell exit block -> ret at %#lx\n", (unsigned long)entry);
+}
+
+static void
+sb_exit(int code)
+{
+	sb_exit_common("exit", code);
+}
+
+static void
+sb__exit(int code)
+{
+	sb_exit_common("_exit", code);
+}
+
+static void
+sb_abort(void)
+{
+	sb_exit_common("abort", 134);
+}
+
+#define DYLD_INTERPOSE(_replacement, _replacee) \
+	__attribute__((used)) static struct { const void *replacement; const void *replacee; } \
+	_interpose_##_replacee __attribute__((section("__DATA,__interpose"))) = \
+	{ (const void *)(uintptr_t) &_replacement, (const void *)(uintptr_t) &_replacee }
+
+DYLD_INTERPOSE(sb_exit, exit);
+DYLD_INTERPOSE(sb__exit, _exit);
+DYLD_INTERPOSE(sb_abort, abort);
 
 /*
  * Boot-arg touch_lat=1: a line for every turn of SpringBoard's main run loop -- when it woke up (a
@@ -556,6 +714,117 @@ sb_patch_url_paths(void)
 		original_url_file_path_dir = (void *)method_setImplementation(method, (IMP)url_file_path_dir);
 	}
 	say("hakios: NSURL path hooks %s\n", original_url_init_path != NULL ? "installed" : "MISSING");
+}
+
+/* ---- the nil object in __NSSetM removeObject: --------------------------------------------- */
+
+/*
+ * iOS 16.5's SpringBoard dies with
+ *
+ *   *** Terminating app due to uncaught exception 'NSInvalidArgumentException',
+ *       reason: '*** -[__NSSetM removeObject:]: object cannot be nil'
+ *
+ * after it has set up the display and the first scene.  On a real iPhone the
+ * set never gets a nil there; here some object that should have been made is
+ * missing (a service answer, a display/Scene object).  Say who asks, then just
+ * skip the call: removing nil from a set is a no-op anyway.
+ */
+static void (*original_set_remove)(id, SEL, id);
+
+static void
+sb_describe_method(uintptr_t addr)
+{
+	int count = objc_getClassList(NULL, 0);
+	Class *classes;
+	Class best_class = Nil;
+	Method best_method = NULL;
+	uintptr_t best_imp = 0;
+
+	if (count <= 0) {
+		return;
+	}
+	classes = calloc((size_t)count, sizeof(Class));
+	if (classes == NULL) {
+		return;
+	}
+	count = objc_getClassList(classes, count);
+	for (int i = 0; i < count; i++) {
+		for (int meta = 0; meta < 2; meta++) {
+			Class cls = meta != 0 ? object_getClass(classes[i]) : classes[i];
+			unsigned nmethods = 0;
+			Method *methods = class_copyMethodList(cls, &nmethods);
+
+			if (methods == NULL) {
+				continue;
+			}
+			for (unsigned j = 0; j < nmethods; j++) {
+				uintptr_t imp = (uintptr_t)method_getImplementation(methods[j]);
+
+				if (imp <= addr && imp > best_imp) {
+					best_imp = imp;
+					best_method = methods[j];
+					best_class = cls;
+				}
+			}
+			free(methods);
+		}
+	}
+	if (best_method != NULL && addr - best_imp < 0x20000) {
+		say("hakios:   nearest method %c[%s %s] + %#lx\n",
+		    class_isMetaClass(best_class) ? '+' : '-', class_getName(best_class),
+		    sel_getName(method_getName(best_method)), (unsigned long)(addr - best_imp));
+	}
+	free(classes);
+}
+
+static void
+sb_set_remove(id self, SEL selector, id object)
+{
+	if (object == NULL) {
+		uintptr_t ra = (uintptr_t)__builtin_return_address(0);
+		uintptr_t ra1 = (uintptr_t)__builtin_return_address(1);
+		Dl_info info;
+		const char *name = "?";
+		unsigned long off = 0;
+
+		if (ra != 0 && dladdr((void *)ra, &info) && info.dli_fname != NULL) {
+			const char *slash = strrchr(info.dli_fname, '/');
+
+			name = slash ? slash + 1 : info.dli_fname;
+			off = (unsigned long)(ra - (uintptr_t)info.dli_fbase);
+		}
+		say("hakios: -[%s removeObject:nil] from %p %s+%#lx\n",
+		    object_getClassName(self), (void *)ra, name, off);
+		sb_describe_method(ra);
+		if (ra1 != 0) {
+			sb_say_addr("  caller ", ra1);
+			sb_describe_method(ra1);
+		}
+		return;
+	}
+	original_set_remove(self, selector, object);
+}
+
+static void
+sb_hook_nil_set_remove(void)
+{
+	static const char *const names[] = { "__NSSetM", "__NSMutableSetM", "NSMutableSet" };
+
+	for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		Class cls = objc_getClass(names[i]);
+		Method method;
+
+		if (cls == NULL) {
+			continue;
+		}
+		method = class_getInstanceMethod(cls, sel_registerName("removeObject:"));
+		if (method == NULL) {
+			continue;
+		}
+		original_set_remove = (void *)method_setImplementation(method, (IMP)sb_set_remove);
+		say("hakios: -[%s removeObject:] hooked\n", names[i]);
+		break;
+	}
 }
 
 /* ---- methods of SpringBoard's classes, replaced --------------------------------------------------- */
@@ -2054,7 +2323,8 @@ sb_sample_threads(void)
 static void
 sb_arm_stack_sampler(void)
 {
-	static const int at[] = { 5, 15, 30, 45, 60, 80, 100, 120, 150, 180, 220, 260, 290 };
+	static const int at[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+	    20, 30, 45, 60, 80, 100, 120, 150, 180, 220, 260, 290 };
 
 	for (unsigned n = 0; n < sizeof(at) / sizeof(at[0]); n++) {
 		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)at[n] * NSEC_PER_SEC),
@@ -2297,7 +2567,9 @@ hakios_springboard_init(void)
 	load_tweaks();
 	pthread_threadid_np(NULL, &sb_main_tid);
 	watch_main_loop();
-	sb_arm_stack_sampler();
+	if (sb_probe_verbose()) {
+		sb_arm_stack_sampler();
+	}
 	for (int n = 1; n <= 8; n++) {
 		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)n * 1000 * NSEC_PER_MSEC),
 		    dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -2331,6 +2603,9 @@ hakios_springboard_init(void)
 	}
 	slide = (uintptr_t)_dyld_get_shared_cache_range(&length) - CACHE_BASE;
 	sb_patch_url_paths();
+	sb_patch_exit_functions();
+	sb_patch_shell_exit_block();
+	sb_hook_nil_set_remove();
 	sb_patch_mc_xpc();
 	sb_patch_ls_seeding_wait();
 	/* (the setup sentinel and DataMigration are not patched: their return
